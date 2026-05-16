@@ -16,8 +16,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create automatic release
-        uses: marvinpinto/action-automatic-releases@latest
+      - name: Create release with commit changelog
+        uses: actions/github-script@v9
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          prerelease: false
+          script: |
+            const { execSync } = require('child_process');
+            const tag = context.ref.replace('refs/tags/', '');
+            const { owner, repo } = context.repo;
+
+            // Find the previous tag (sorted by version, excluding current)
+            const allTags = execSync('git tag --sort=-version:refname')
+              .toString().trim().split('\n').filter(t => t && t !== tag);
+            const prevTag = allTags[0] || '';
+
+            // Get commits since previous tag, or all commits on first release
+            const range = prevTag ? `${prevTag}..${tag}` : tag;
+            const logOutput = execSync(`git log "${range}" --pretty=format:"%h: %s (%an)" --no-merges`)
+              .toString().trim();
+
+            const lines = logOutput.split('\n').filter(Boolean).map(l => `- ${l}`);
+            const body = `## Commits\n\n${lines.join('\n')}`;
+
+            await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              name: tag,
+              body,
+              draft: false,
+              prerelease: false,
+            });
